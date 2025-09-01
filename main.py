@@ -10,14 +10,16 @@ import time
 import re
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from stats import LogStats
 
 
 class LogFileHandler(FileSystemEventHandler):
-    def __init__(self, logfile_path, verbose=False, filter_pattern=None):
+    def __init__(self, logfile_path, verbose=False, filter_pattern=None, stats=None):
         self.logfile_path = logfile_path
         self.verbose = verbose
         self.filter_pattern = None
         self.file_position = 0
+        self.stats = stats
         
         if filter_pattern:
             try:
@@ -56,9 +58,15 @@ class LogFileHandler(FileSystemEventHandler):
     def print_line(self, line):
         timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
         
-        if self.is_error_line(line):
+        is_error = self.is_error_line(line)
+        is_warning = self.is_warning_line(line)
+        
+        if self.stats:
+            self.stats.update_line_count(is_error, is_warning)
+        
+        if is_error:
             print(f"\033[91m[{timestamp}] ERROR: {line}\033[0m")
-        elif self.is_warning_line(line):
+        elif is_warning:
             print(f"\033[93m[{timestamp}] WARN: {line}\033[0m")
         else:
             print(f"[{timestamp}] {line}")
@@ -77,6 +85,7 @@ def parse_args():
     parser.add_argument('logfile', help='Path to the log file to monitor')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('-f', '--filter', help='Filter pattern (regex)')
+    parser.add_argument('-s', '--stats', action='store_true', help='Enable statistics tracking')
     return parser.parse_args()
 
 
@@ -91,8 +100,11 @@ def main():
     print(f"Starting LogMonitor for file: {logfile_path}")
     if args.filter:
         print(f"Filter pattern: {args.filter}")
+    if args.stats:
+        print("Statistics tracking enabled")
     
-    event_handler = LogFileHandler(logfile_path, args.verbose, args.filter)
+    stats = LogStats() if args.stats else None
+    event_handler = LogFileHandler(logfile_path, args.verbose, args.filter, stats)
     observer = Observer()
     observer.schedule(event_handler, os.path.dirname(logfile_path), recursive=False)
     
@@ -105,6 +117,8 @@ def main():
     except KeyboardInterrupt:
         observer.stop()
         print("\nMonitoring stopped.")
+        if stats:
+            stats.print_summary()
     
     observer.join()
 
